@@ -1,14 +1,14 @@
-group = "app.template"
+group = "app.withingsecg"
 
 patches {
     // TODO: Update this section with your project details.
     about {
-        name = "UserXYZ Patches"
-        description = "Patches for apps I like"
-        source = "git@github.com:UserXYZ/morphe-patches.git"
-        author = "Awesome dev"
-        contact = "na"
-        website = "na"
+        name = "WithingsECG Patches"
+        description = "Unlocks the region-locked ECG feature on Withings ScanWatch family watches"
+        source = "https://github.com/gdevenyi/WithingsECG"
+        author = "gdevenyi"
+        contact = "https://github.com/gdevenyi/WithingsECG/issues"
+        website = "https://github.com/gdevenyi/WithingsECG"
         license = "GPLv3"
     }
 }
