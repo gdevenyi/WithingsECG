@@ -72,3 +72,22 @@ app is almost certainly present in the shared firmware and gated at runtime by
 (1) the server-withheld platform features (4/27), (2) the absent WPP feature tag
 (id 4) push, and (3) the FeatureTags-conversation registration gate (`yf.z`,
 platform feature 108). The patch neutralises all three app-side gates.
+
+## 🔬 Deep debugging (if the watch still hides ECG after patching)
+
+If the watch menu stays empty after a successful sync, add the official
+[Morphe patches](https://github.com/MorpheApp/morphe-patches) source in Morphe Manager as a
+second bundle and enable two universal patches alongside **Unlock ECG**:
+
+* **Override certificate pinning** — trusts user CAs (`overridePins`), letting mitmproxy
+  observe `scalews.withings.net` traffic. This shows exactly which feature tags were pushed
+  and captures the authenticated `v2/firmware?action=getupdate` and
+  `v2/feature?action=set` exchanges.
+* **Enable Android debugging** — makes the patched app debuggable so
+  `adb shell run-as com.withings.wiscale2` can read the Room database
+  (`feature`, `featuretag` tables), shared preferences and the app's file logs directly.
+
+Then: install a mitmproxy CA on the device, set the Wi-Fi proxy, open the device page and
+force a sync. The captured `v2/feature?action=getbydevice` response shows the server-side
+feature set for the device, and `v2/feature?action=set&featureid=4&deviceid=<id>` can be
+replayed with the app session to attempt a server-side activation.
