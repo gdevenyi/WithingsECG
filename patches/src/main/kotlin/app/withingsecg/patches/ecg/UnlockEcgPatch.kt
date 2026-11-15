@@ -137,12 +137,16 @@ private fun injectEcgFeatureTag(method: MutableMethod) {
         const/4 v6, 0x0
         new-instance v0, Lqra;
         invoke-direct/range {v0 .. v6}, Lqra;-><init>(ZZZLorg/joda/time/Instant;Lorg/joda/time/Instant;Ljava/lang/Integer;)V
+        new-instance v5, Ljava/util/HashMap;
+        invoke-direct {v5}, Ljava/util/HashMap;-><init>()V
+        invoke-static {p1, p2}, Ljava/lang/Long;->valueOf(J)Ljava/lang/Long;
+        move-result-object v7
+        invoke-virtual {v5, v7, v0}, Ljava/util/HashMap;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
         new-instance v6, Lrra;
         const/16 v7, $FEATURE_ID_ECG
         move-wide v8, p1
         move-object v10, v0
-        invoke-static {}, Ljava/util/Collections;->emptyMap()Ljava/util/Map;
-        move-result-object v11
+        move-object v11, v5
         invoke-direct/range {v6 .. v11}, Lrra;-><init>(IJLqra;Ljava/util/Map;)V
         invoke-interface {p0, v6}, Ljava/util/List;->add(Ljava/lang/Object;)Z
         return-void
