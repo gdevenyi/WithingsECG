@@ -82,6 +82,36 @@ object IsFeatureTagSyncEnabledFingerprint : Fingerprint(
 )
 
 /**
+ * PlatformFeatureDao_ProdRoomDb_Impl per-id reads. The region-locked account has
+ * no feature 4/27 rows at all, so per-id lookups return null and downstream
+ * consumers (shortcut picker list, feature state screens) never see the ECG
+ * feature. The patch returns a synthetic active entity for ids 4 and 27.
+ */
+object GetFeatureDaoFingerprint : Fingerprint(
+    definingClass = "Lcom/withings/feature/tag/platform/model/PlatformFeatureDao_ProdRoomDb_Impl;",
+    name = "getFeature\$lambda\$0",
+    returnType = "Lcom/withings/feature/tag/platform/model/PlatformFeatureEntity;",
+    parameters = listOf(
+        "Ljava/lang/String;",
+        "I",
+        "Lcom/withings/feature/tag/platform/model/PlatformFeatureDao_ProdRoomDb_Impl;",
+        "Luym;"
+    )
+)
+
+object GetFeatureAsFlowDaoFingerprint : Fingerprint(
+    definingClass = "Lcom/withings/feature/tag/platform/model/PlatformFeatureDao_ProdRoomDb_Impl;",
+    name = "getFeatureAsFlow\$lambda\$0",
+    returnType = "Lcom/withings/feature/tag/platform/model/PlatformFeatureEntity;",
+    parameters = listOf(
+        "Ljava/lang/String;",
+        "I",
+        "Lcom/withings/feature/tag/platform/model/PlatformFeatureDao_ProdRoomDb_Impl;",
+        "Luym;"
+    )
+)
+
+/**
  * RoomPlatformFeatureRepository.getAllFeaturesForDevice is the blocking read of
  * the locally synced platform features used by feature screens and tutorials.
  */
@@ -249,6 +279,46 @@ private fun injectEcgFeatureForDevice(method: MutableMethod) {
     method.addInstructions(insertIndex, injection)
 }
 
+/**
+ * Returns a synthetic active PlatformFeatureEntity for the ECG feature ids
+ * (4 = ECG, 27 = ECG shortcut) from the per-id DAO reads. Entity owners stay
+ * empty: the patched isActivatedForDevice never inspects them.
+ */
+private fun injectSyntheticDaoEntity(method: MutableMethod) {
+    val impl = method.implementation!!
+    val idParamReg = 1 // static (String, I, Impl, uym): p1 = feature id
+    val injection = """
+        const/16 v0, $FEATURE_ID_ECG
+        if-ne p$idParamReg, v0, :withings_not_ecg
+        new-instance v0, Lcom/withings/feature/tag/platform/model/PlatformFeatureEntity;
+        const/16 v1, $FEATURE_ID_ECG
+        new-instance v2, Ljava/util/ArrayList;
+        invoke-direct {v2}, Ljava/util/ArrayList;-><init>()V
+        new-instance v3, $DEVICE_OWNER_CLASS
+        invoke-direct {v3}, $DEVICE_OWNER_CLASS-><init>()V
+        invoke-virtual {v2, v3}, Ljava/util/ArrayList;->add(Ljava/lang/Object;)Z
+        const/4 v4, 0x1
+        invoke-direct {v0, v1, v2, v3, v4}, Lcom/withings/feature/tag/platform/model/PlatformFeatureEntity;-><init>(ILjava/lang/String;Ljava/util/List;Z)V
+        return-object v0
+        :withings_not_ecg
+        const/16 v0, $FEATURE_ID_ECG_SHORTCUT
+        if-ne p$idParamReg, v0, :withings_orig
+        new-instance v0, Lcom/withings/feature/tag/platform/model/PlatformFeatureEntity;
+        const/16 v1, $FEATURE_ID_ECG_SHORTCUT
+        new-instance v2, Ljava/util/ArrayList;
+        invoke-direct {v2}, Ljava/util/ArrayList;-><init>()V
+        new-instance v3, $DEVICE_OWNER_CLASS
+        invoke-direct {v3}, $DEVICE_OWNER_CLASS-><init>()V
+        invoke-virtual {v2, v3}, Ljava/util/ArrayList;->add(Ljava/lang/Object;)Z
+        const/4 v4, 0x1
+        invoke-direct {v0, v1, v2, v3, v4}, Lcom/withings/feature/tag/platform/model/PlatformFeatureEntity;-><init>(ILjava/lang/String;Ljava/util/List;Z)V
+        return-object v0
+        :withings_orig
+    """.trimIndent()
+
+    method.addInstructions(0, injection) // original method writes its locals before reading them
+}
+
 @Suppress("unused")
 val unlockEcgPatch = patch(
     name = "Unlock ECG",
@@ -262,7 +332,7 @@ val unlockEcgPatch = patch(
     compatibleWith(COMPATIBILITY_WITHINGS)
 
     execute {
-        // 1) Force-activate the ECG platform features (4, 27) for every device so
+        // 1) Force-activate the ECG platform feature (4) for every device so
         //    isActivatedForDevice checks (shortcut picker, health features, sync) pass.
         IsFeatureActivatedForDeviceFingerprint.method.addInstructions(
             0,
@@ -270,12 +340,7 @@ val unlockEcgPatch = patch(
                 invoke-virtual {p0}, $FEATURE_CLASS->getFeatureId()I
                 move-result v0
                 const/16 v1, $FEATURE_ID_ECG
-                if-ne v0, v1, :withings_check_shortcut
-                goto :withings_ecg_activated
-                :withings_check_shortcut
-                const/16 v1, $FEATURE_ID_ECG_SHORTCUT
                 if-ne v0, v1, :withings_original
-                :withings_ecg_activated
                 const/4 v0, 0x1
                 return v0
                 :withings_original
@@ -308,5 +373,10 @@ val unlockEcgPatch = patch(
             // 4) Inject the ECG platform feature into the blocking per-device feature read.
             injectEcgFeatureForDevice(GetAllFeaturesForDeviceFingerprint.method)
         }
+
+        // 5) Per-id DAO reads return a synthetic active ECG entity (4/27) so the
+        //    shortcut picker and feature screens see the feature at all.
+        injectSyntheticDaoEntity(GetFeatureDaoFingerprint.method)
+        injectSyntheticDaoEntity(GetFeatureAsFlowDaoFingerprint.method)
     }
 }
