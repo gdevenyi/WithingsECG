@@ -40,6 +40,23 @@ object IsFeatureActivatedForDeviceFingerprint : Fingerprint(
     )
 )
 
+/**
+ * PlatformFeatureKt.isDeviceEligible — same shape as isActivatedForDevice but
+ * without the active flag. DeviceFeaturesLiveData and feature screens use it to
+ * keep synthetic entities in their lists; without the force-through the
+ * synthetic ECG entity would be nulled out (its owners cannot match a real
+ * device id) and null entries would reach feature-id consumers.
+ */
+object IsDeviceEligibleFingerprint : Fingerprint(
+    definingClass = "Lcom/withings/feature/platform/model/PlatformFeatureKt;",
+    name = "isDeviceEligible",
+    returnType = "Z",
+    parameters = listOf(
+        "Lcom/withings/feature/platform/model/PlatformFeature;",
+        "J"
+    )
+)
+
 object GetEcgFeatureStateFingerprint : Fingerprint(
     definingClass = "Lcom/withings/feature/tag/platform/api/PlatformFeatureHelper\$Companion;",
     name = "getEcgFeatureState",
@@ -347,7 +364,22 @@ val unlockEcgPatch = patch(
             """
         )
 
-        // 2) Always report the aggregated ECG feature state as On.
+        // 2) Force device eligibility for the ECG platform feature so synthetic
+        //    entities survive list assembly (prevents null entries downstream).
+        IsDeviceEligibleFingerprint.method.addInstructions(
+            0,
+            """
+                invoke-virtual {p0}, $FEATURE_CLASS->getFeatureId()I
+                move-result v0
+                const/16 v1, $FEATURE_ID_ECG
+                if-ne v0, v1, :withings_eligible_original
+                const/4 v0, 0x1
+                return v0
+                :withings_eligible_original
+            """
+        )
+
+        // 3) Always report the aggregated ECG feature state as On.
         GetEcgFeatureStateFingerprint.method.addInstructions(
             0,
             """
