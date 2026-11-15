@@ -91,3 +91,19 @@ Then: install a mitmproxy CA on the device, set the Wi-Fi proxy, open the device
 force a sync. The captured `v2/feature?action=getbydevice` response shows the server-side
 feature set for the device, and `v2/feature?action=set&featureid=4&deviceid=<id>` can be
 replayed with the app session to attempt a server-side activation.
+
+### 🛰️ Server-response injection (auto-inject the ECG feature)
+
+With the certificate-pinning override and a mitmproxy CA installed:
+
+```bash
+uv tool install mitmproxy   # or: pacman -S mitmproxy
+mitmdump -s mitm_ecg.py --listen-port 8080
+# set the phone's Wi-Fi proxy to this host:8080, then open the device page and sync
+```
+
+`mitm_ecg.py` (kept next to this repo in your workspace) logs
+`v2/feature?action=getbydevice`, rewrites the response to include platform
+feature 4 as active for each device, logs any `action=set` calls, and captures
+`v2/firmware?action=getupdate` offers for offline diffing between the Vitals
+and ScanWatch 2 builds.
