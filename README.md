@@ -61,3 +61,14 @@ The patch (target: `com.withings.wiscale2`, developed against 26.46.0):
 ## 📜 License
 
 GPLv3 — see [LICENSE](LICENSE).
+
+## 🔍 Lock analysis notes (for maintainers)
+
+"ScanWatch Vitals" is a marketing name spanning multiple regional SKUs of the same
+`hwa10` hardware (US Rx variant, Canadian wellness variant, etc.). The model id
+reported by all of them is 94 — identical to ScanWatch 2. Since one firmware series
+(3411) covers the family and the US Rx variant ships ECG on the same model, the ECG
+app is almost certainly present in the shared firmware and gated at runtime by
+(1) the server-withheld platform features (4/27), (2) the absent WPP feature tag
+(id 4) push, and (3) the FeatureTags-conversation registration gate (`yf.z`,
+platform feature 108). The patch neutralises all three app-side gates.
