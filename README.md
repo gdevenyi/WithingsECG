@@ -102,7 +102,7 @@ mitmdump -s mitm_ecg.py --listen-port 8080
 # set the phone's Wi-Fi proxy to this host:8080, then open the device page and sync
 ```
 
-`mitm_ecg.py` (kept next to this repo in your workspace) logs
+`tools/mitm_ecg.py` (in this repo) logs
 `v2/feature?action=getbydevice`, rewrites the response to include platform
 feature 4 as active for each device, logs any `action=set` calls, and captures
 `v2/firmware?action=getupdate` offers for offline diffing between the Vitals
