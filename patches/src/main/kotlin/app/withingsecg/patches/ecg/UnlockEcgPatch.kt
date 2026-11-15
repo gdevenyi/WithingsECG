@@ -128,6 +128,18 @@ object GetFeatureAsFlowDaoFingerprint : Fingerprint(
     )
 )
 
+object GetFeatureLiveDataDaoFingerprint : Fingerprint(
+    definingClass = "Lcom/withings/feature/tag/platform/model/PlatformFeatureDao_ProdRoomDb_Impl;",
+    name = "getFeatureLiveData\$lambda\$0",
+    returnType = "Lcom/withings/feature/tag/platform/model/PlatformFeatureEntity;",
+    parameters = listOf(
+        "Ljava/lang/String;",
+        "I",
+        "Lcom/withings/feature/tag/platform/model/PlatformFeatureDao_ProdRoomDb_Impl;",
+        "Luym;"
+    )
+)
+
 /**
  * RoomPlatformFeatureRepository.getAllFeaturesForDevice is the blocking read of
  * the locally synced platform features used by feature screens and tutorials.
@@ -410,5 +422,6 @@ val unlockEcgPatch = patch(
         //    shortcut picker and feature screens see the feature at all.
         injectSyntheticDaoEntity(GetFeatureDaoFingerprint.method)
         injectSyntheticDaoEntity(GetFeatureAsFlowDaoFingerprint.method)
+        injectSyntheticDaoEntity(GetFeatureLiveDataDaoFingerprint.method)
     }
 }
