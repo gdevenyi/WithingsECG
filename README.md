@@ -107,3 +107,16 @@ mitmdump -s mitm_ecg.py --listen-port 8080
 feature 4 as active for each device, logs any `action=set` calls, and captures
 `v2/firmware?action=getupdate` offers for offline diffing between the Vitals
 and ScanWatch 2 builds.
+
+## ✅ Verified outcome (2025-11-15)
+
+Patched app 26.46.0 on a ScanWatch Vitals (Canada), firmware 3411:
+
+* Long-press shortcut picker lists **Record an ECG**; selecting it writes the
+  ECG shortcut to the watch and persists.
+* Crown long-press launches the ECG; a recording taken this way synced to the
+  app and appears in the Health Journal (ECG entry, PDF export available).
+
+Note: the region lock is enforced by the *server-withheld platform features and
+feature tags* on an otherwise ECG-capable, shared-firmware device — the patch
+neutralises those gates app-side.
