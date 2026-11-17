@@ -10,8 +10,10 @@ import app.morphe.patcher.util.smali.InlineSmaliCompiler
 import app.withingsecg.patches.shared.Constants.COMPATIBILITY_WITHINGS
 import com.android.tools.smali.dexlib2.AccessFlags
 import com.android.tools.smali.dexlib2.Opcode
+import com.android.tools.smali.dexlib2.iface.instruction.FiveRegisterInstruction
 import com.android.tools.smali.dexlib2.iface.instruction.OneRegisterInstruction
 import com.android.tools.smali.dexlib2.iface.instruction.ReferenceInstruction
+import com.android.tools.smali.dexlib2.iface.reference.TypeReference
 import com.android.tools.smali.dexlib2.immutable.ImmutableMethod
 import com.android.tools.smali.dexlib2.immutable.ImmutableMethodImplementation
 import com.android.tools.smali.dexlib2.immutable.ImmutableMethodParameter
@@ -54,6 +56,27 @@ object IsDeviceEligibleFingerprint : Fingerprint(
     parameters = listOf(
         "Lcom/withings/feature/platform/model/PlatformFeature;",
         "J"
+    )
+)
+
+/**
+ * jme.e is the HWA10 ECG status provider: it maps the server-side classification
+ * code (i2) to display strings, gated by a region-clearance byte packed in the
+ * classification data (whl.b). For non-cleared markets that byte is 0 and the
+ * provider falls back to "Not classified" even though the server computed a
+ * proper result (visible on the Withings web dashboard). Forcing whl.b = 1
+ * after construction lets every regional gate pass so the real classification
+ * is displayed.
+ */
+object JmeEcgStatusFingerprint : Fingerprint(
+    definingClass = "Ljme;",
+    name = "e",
+    returnType = "Lzp8;",
+    parameters = listOf(
+        "I",
+        "I",
+        "Ljava/lang/Integer;",
+        "Ljava/lang/Integer;"
     )
 )
 
@@ -149,6 +172,55 @@ object GetFeatureLiveDataDaoFingerprint : Fingerprint(
  * (11n/11x/12x/21c/22c/35c/range) cannot encode higher registers, and the inline
  * smali compiler silently drops such instructions.
  */
+/**
+ * Forces the region-clearance byte (whl.b) to 1 right after the whl tuple is
+ * constructed inside jme.e, so every regional status gate in the method passes
+ * and the server-computed ECG classification is displayed in the app.
+ *
+ * The two inserted instructions reuse a scratch register that only held a
+ * byte-buffer temp consumed by the constructor.
+ */
+private fun forceWhlClassificationFlag(method: MutableMethod) {
+    val impl = method.implementation!!
+    val count = impl.instructions.count()
+    var i = 0
+    while (i < count) {
+        val insn = impl.instructions[i]
+        if (insn.opcode == Opcode.NEW_INSTANCE) {
+            val type = (insn as? ReferenceInstruction)?.reference as? TypeReference
+            if (type?.type == "Lwhl;") {
+                val whlReg = (insn as OneRegisterInstruction).registerA
+                // The constructor may not directly follow the new-instance;
+                // scan forward for the invoke-direct that initializes it.
+                var j = i + 1
+                var scratch = -1
+                while (j < count && j <= i + 32) {
+                    val candidate = impl.instructions[j]
+                    if (candidate.opcode == Opcode.INVOKE_DIRECT &&
+                        (candidate as? ReferenceInstruction)?.reference.let {
+                            (it as? com.android.tools.smali.dexlib2.iface.reference.MethodReference)?.definingClass == "Lwhl;"
+                        } == true
+                    ) {
+                        scratch = (candidate as FiveRegisterInstruction).registerD
+                        method.addInstructions(
+                            j + 1,
+                            """
+                                const/4 v$scratch, 0x1
+                                iput v$scratch, v$whlReg, Lwhl;->b:I
+                            """.trimIndent()
+                        )
+                        return
+                    }
+                    j++
+                }
+                throw app.morphe.patcher.patch.PatchException("whl constructor not found in jme.e")
+            }
+        }
+        i++
+    }
+    throw app.morphe.patcher.patch.PatchException("whl construction not found in jme.e")
+}
+
 private fun injectEcgFeatureTag(method: MutableMethod) {
     val impl = method.implementation!!
     val thisReg = impl.registerCount - 1 // non-static, no params: this is the highest register
@@ -361,8 +433,14 @@ val unlockEcgPatch = patch(
                 """
             )
 
+
+
             // 4) Inject the ECG platform feature into the sync-written feature database.
             }
+
+        // 3c) Show the server-computed ECG classification in the app
+        //     (region gate on the status provider forces "Not classified").
+        forceWhlClassificationFlag(JmeEcgStatusFingerprint.method)
 
         // 5) Per-id DAO reads return a synthetic active ECG entity (4/27) so the
         //    shortcut picker and feature screens see the feature at all.
