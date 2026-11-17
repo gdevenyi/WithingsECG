@@ -141,17 +141,6 @@ object GetFeatureLiveDataDaoFingerprint : Fingerprint(
 )
 
 /**
- * RoomPlatformFeatureRepository.getAllFeaturesForDevice is the blocking read of
- * the locally synced platform features used by feature screens and tutorials.
- */
-object GetAllFeaturesForDeviceFingerprint : Fingerprint(
-    definingClass = FEATURE_REPO_CLASS,
-    name = "getAllFeaturesForDevice",
-    returnType = "Ljava/util/List;",
-    parameters = listOf("J")
-)
-
-/**
  * Appends an rra feature tag (feature id 4, active) for the current device to the
  * tag list right after it is fetched, so the normal grouping logic pushes the ECG
  * tag to the watch on every sync.
@@ -170,6 +159,17 @@ private fun injectEcgFeatureTag(method: MutableMethod) {
     if (insertIndex < 0) throw app.morphe.patcher.patch.PatchException("List check-cast not found in FeatureTagsConversation.K")
 
     val injection = """
+        invoke-interface {v0}, Ljava/util/List;->size()I
+        move-result v11
+        new-instance v12, Ljava/lang/StringBuilder;
+        invoke-direct {v12}, Ljava/lang/StringBuilder;-><init>()V
+        const-string v13, "withings-ecg: K fetched tags, size="
+        invoke-virtual {v12, v13}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+        invoke-virtual {v12, v11}, Ljava/lang/StringBuilder;->append(I)Ljava/lang/StringBuilder;
+        invoke-virtual {v12}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
+        move-result-object v13
+        sget-object v11, Ljava/lang/System;->out:Ljava/io/PrintStream;
+        invoke-virtual {v11, v13}, Ljava/io/PrintStream;->println(Ljava/lang/String;)V
         invoke-virtual {v$thisReg}, $FEATURE_TAGS_CONVERSATION->D()Lgjv;
         move-result-object v1
         invoke-virtual {v1}, Lgjv;->a()Lx0h;
@@ -180,9 +180,27 @@ private fun injectEcgFeatureTag(method: MutableMethod) {
         invoke-virtual {v2}, Lcom/withings/device/Device;->getId()J
         move-result-wide v1
         invoke-static {v0, v1, v2}, $FEATURE_TAGS_CONVERSATION->withingsInjectEcgTag(Ljava/util/List;J)V
+        const-string v1, "withings-ecg: ECG tag (id 4) appended to tag list"
+        sget-object v2, Ljava/lang/System;->out:Ljava/io/PrintStream;
+        invoke-virtual {v2, v1}, Ljava/io/PrintStream;->println(Ljava/lang/String;)V
     """.trimIndent()
 
     method.addInstructions(insertIndex + 1, injection)
+
+    // Success marker just before K's final return: if the watch rejected the
+    // deprecated tag command (yms), the catch path returns without this marker.
+    val finalIdx = impl.instructions.count() - 1
+    if (impl.instructions.last().opcode != Opcode.RETURN_VOID) {
+        throw app.morphe.patcher.patch.PatchException("Unexpected final instruction in FeatureTagsConversation.K")
+    }
+    method.addInstructions(
+        finalIdx,
+        """
+            const-string v0, "withings-ecg: feature tag push completed"
+            sget-object v1, Ljava/lang/System;->out:Ljava/io/PrintStream;
+            invoke-virtual {v1, v0}, Ljava/io/PrintStream;->println(Ljava/lang/String;)V
+        """.trimIndent()
+    )
 
     // Static helper added to the same class: builds qra(enabled, seen, activated)
     // and rra(featureId 4, deviceId, active, no window), then appends it to the
@@ -234,79 +252,6 @@ private fun injectEcgFeatureTag(method: MutableMethod) {
     mutableClassDefBy(FEATURE_TAGS_CONVERSATION).methods.add(helper)
 }
 
-/**
- * Adds a static factory method that builds the synthetic ECG PlatformFeature
- * (feature id 4, active DeviceOwner for the given device id), then reduces the
- * injection in getAllFeaturesForDevice to a single call. A dedicated method has
- * its own register space, which sidesteps the v0..v15 encodability limit of the
- * small dex formats inside the 8-register original.
- */
-private fun injectEcgFeatureForDevice(method: MutableMethod) {
-    val impl = method.implementation!!
-    val regCount = impl.registerCount
-    val p1 = regCount - 2 // low half of the long device id parameter
-    val p2 = regCount - 1 // high half of the long device id parameter
-    if (p2 > 15) throw app.morphe.patcher.patch.PatchException("Device id parameter registers exceed v15")
-
-    val helperBody = """
-        invoke-static {p0, p1}, Ljava/lang/Long;->valueOf(J)Ljava/lang/Long;
-        move-result-object v1
-        const/4 v2, 0x1
-        const/4 v3, 0x0
-        const/4 v4, 0x0
-        const-wide/16 v5, 0x0
-        const/4 v7, 0x0
-        const/4 v8, 0x0
-        const/4 v9, 0x0
-        const/4 v10, 0x0
-        const/4 v11, 0x0
-        new-instance v0, $DEVICE_OWNER_CLASS
-        invoke-direct/range {v0 .. v11}, $DEVICE_OWNER_CLASS-><init>(Ljava/lang/Long;ZZZJLjava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;ZLjava/lang/Integer;)V
-        new-instance v4, Ljava/util/ArrayList;
-        invoke-direct {v4}, Ljava/util/ArrayList;-><init>()V
-        invoke-virtual {v4, v0}, Ljava/util/ArrayList;->add(Ljava/lang/Object;)Z
-        new-instance v2, $FEATURE_CLASS
-        const/16 v3, $FEATURE_ID_ECG
-        const/4 v5, 0x0
-        const/4 v6, 0x1
-        invoke-direct {v2, v3, v5, v4, v6}, $FEATURE_CLASS-><init>(ILjava/lang/String;Ljava/util/List;Z)V
-        return-object v2
-    """.trimIndent()
-
-    val compiled = app.morphe.patcher.util.smali.InlineSmaliCompiler.compile(helperBody, "J", 15, true)
-    val helper = com.android.tools.smali.dexlib2.immutable.ImmutableMethod(
-        FEATURE_REPO_CLASS,
-        "withingsSyntheticEcgFeature",
-        listOf(com.android.tools.smali.dexlib2.immutable.ImmutableMethodParameter("J", null, null)),
-        FEATURE_CLASS,
-        AccessFlags.PUBLIC.value or AccessFlags.STATIC.value,
-        null,
-        null,
-        com.android.tools.smali.dexlib2.immutable.ImmutableMethodImplementation(
-            15,
-            compiled,
-            emptyList(),
-            emptyList()
-        )
-    ).toMutable()
-
-    mutableClassDefBy(FEATURE_REPO_CLASS).methods.add(helper)
-
-    val finalInstruction = impl.instructions.last()
-    if (finalInstruction.opcode != Opcode.RETURN_OBJECT) {
-        throw app.morphe.patcher.patch.PatchException("Unexpected final instruction in getAllFeaturesForDevice")
-    }
-    val retRegister = (finalInstruction as OneRegisterInstruction).registerA
-
-    val injection = """
-        invoke-static {v$p1, v$p2}, $FEATURE_REPO_CLASS->withingsSyntheticEcgFeature(J)$FEATURE_CLASS
-        move-result-object v3
-        invoke-interface {v$retRegister, v3}, Ljava/util/List;->add(Ljava/lang/Object;)Z
-    """.trimIndent()
-
-    val insertIndex = impl.instructions.count() - 1
-    method.addInstructions(insertIndex, injection)
-}
 
 /**
  * Returns a synthetic active PlatformFeatureEntity for the ECG feature ids
@@ -319,26 +264,28 @@ private fun injectSyntheticDaoEntity(method: MutableMethod) {
     val injection = """
         const/16 v0, $FEATURE_ID_ECG
         if-ne p$idParamReg, v0, :withings_not_ecg
+        new-instance v3, Ljava/util/ArrayList;
+        invoke-direct {v3}, Ljava/util/ArrayList;-><init>()V
+        new-instance v4, $DEVICE_OWNER_CLASS
+        invoke-direct {v4}, $DEVICE_OWNER_CLASS-><init>()V
+        invoke-virtual {v3, v4}, Ljava/util/ArrayList;->add(Ljava/lang/Object;)Z
         new-instance v0, Lcom/withings/feature/tag/platform/model/PlatformFeatureEntity;
         const/16 v1, $FEATURE_ID_ECG
-        new-instance v2, Ljava/util/ArrayList;
-        invoke-direct {v2}, Ljava/util/ArrayList;-><init>()V
-        new-instance v3, $DEVICE_OWNER_CLASS
-        invoke-direct {v3}, $DEVICE_OWNER_CLASS-><init>()V
-        invoke-virtual {v2, v3}, Ljava/util/ArrayList;->add(Ljava/lang/Object;)Z
+        const/4 v2, 0x0
         const/4 v4, 0x1
         invoke-direct {v0, v1, v2, v3, v4}, Lcom/withings/feature/tag/platform/model/PlatformFeatureEntity;-><init>(ILjava/lang/String;Ljava/util/List;Z)V
         return-object v0
         :withings_not_ecg
         const/16 v0, $FEATURE_ID_ECG_SHORTCUT
         if-ne p$idParamReg, v0, :withings_orig
+        new-instance v3, Ljava/util/ArrayList;
+        invoke-direct {v3}, Ljava/util/ArrayList;-><init>()V
+        new-instance v4, $DEVICE_OWNER_CLASS
+        invoke-direct {v4}, $DEVICE_OWNER_CLASS-><init>()V
+        invoke-virtual {v3, v4}, Ljava/util/ArrayList;->add(Ljava/lang/Object;)Z
         new-instance v0, Lcom/withings/feature/tag/platform/model/PlatformFeatureEntity;
         const/16 v1, $FEATURE_ID_ECG_SHORTCUT
-        new-instance v2, Ljava/util/ArrayList;
-        invoke-direct {v2}, Ljava/util/ArrayList;-><init>()V
-        new-instance v3, $DEVICE_OWNER_CLASS
-        invoke-direct {v3}, $DEVICE_OWNER_CLASS-><init>()V
-        invoke-virtual {v2, v3}, Ljava/util/ArrayList;->add(Ljava/lang/Object;)Z
+        const/4 v2, 0x0
         const/4 v4, 0x1
         invoke-direct {v0, v1, v2, v3, v4}, Lcom/withings/feature/tag/platform/model/PlatformFeatureEntity;-><init>(ILjava/lang/String;Ljava/util/List;Z)V
         return-object v0
@@ -414,9 +361,8 @@ val unlockEcgPatch = patch(
                 """
             )
 
-            // 4) Inject the ECG platform feature into the blocking per-device feature read.
-            injectEcgFeatureForDevice(GetAllFeaturesForDeviceFingerprint.method)
-        }
+            // 4) Inject the ECG platform feature into the sync-written feature database.
+            }
 
         // 5) Per-id DAO reads return a synthetic active ECG entity (4/27) so the
         //    shortcut picker and feature screens see the feature at all.
